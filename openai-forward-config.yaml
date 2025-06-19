@@ -1,0 +1,136 @@
+# ==============================================================================
+# OpenAI Forward Configuration File
+# ==============================================================================
+# Description: Configuration file for OpenAI Forward service to proxy AI APIs
+# Author: Assistant
+# Created: 2024-12-19
+# Version: 1.0
+# 
+# This configuration enables proxying of multiple AI services:
+# - DeepSeek AI (https://api.deepseek.com)
+# - 零一万物 LingyiWanwu (https://api.lingyiwanwu.com/v1) 
+# - Original OpenAI API (https://api.openai.com)
+#
+# All services provide OpenAI-compatible interfaces through this proxy
+# ==============================================================================
+
+# Logging Configuration
+# Enable detailed logging with timestamps for debugging and monitoring
+log:
+  general: true    # Enable general application logging
+  openai: true     # Enable OpenAI API specific logging
+
+# Cache Configuration  
+# Improve performance and reduce costs through intelligent caching
+cache:
+  general: true
+  openai: true
+  routes:
+    - "/v1/chat/completions"
+    - "/v1/embeddings" 
+  backend: MEMORY                              # Cache backend: MEMORY, LMDB, LevelDB
+  root_path_or_url: "./FLAXKV_DB"             # Cache storage path
+  default_request_caching_value: false        # Default caching behavior
+
+# Main chat completion route
+chat_completion_route: "/v1/chat/completions"
+
+# Enable benchmark mode for performance testing
+benchmark_mode: true
+
+# Forward Configuration
+# Define multiple AI service endpoints with OpenAI-compatible routing
+forward:
+  # Original OpenAI API - Default route
+  - base_url: "https://api.openai.com"
+    route: "/"
+    type: "openai"
+    
+  # DeepSeek AI Service - Route: /deepseek
+  # Access via: http://your-host:8000/deepseek/v1/chat/completions
+  - base_url: "https://api.deepseek.com"
+    route: "/deepseek"
+    type: "openai"
+    
+  # 零一万物 LingyiWanwu Service - Route: /lingyiwanwu  
+  # Access via: http://your-host:8000/lingyiwanwu/v1/chat/completions
+  - base_url: "https://api.lingyiwanwu.com"
+    route: "/lingyiwanwu"
+    type: "openai"
+    
+  # Ollama Local AI Service - Route: /ollama
+  # Access via: http://your-host:8000/ollama/v1/chat/completions
+  - base_url: "http://ollama-server:11434"
+    route: "/ollama"
+    type: "general"
+
+# API Key Management
+# Configure access levels and API keys for different services
+api_key:
+  # Define access levels for different model tiers
+  level:
+    0: ["deepseek-chat", "deepseek-coder"]      # DeepSeek models
+    1: ["yi-34b-chat", "yi-6b-chat"]            # LingyiWanwu models  
+    2: ["gpt-3.5-turbo", "gpt-4"]               # OpenAI models
+
+  # Map service API keys to access levels
+  openai_key:
+    # Unified API Key with access to all services
+    "sk-8d6804b011614dba7bd065f8644514b": [0, 1, 2]
+    # DeepSeek API Key
+    "sk-878a5319c7b14bc48109e19315361b7f": [0]
+    # LingyiWanwu API Key  
+    "72ebf8a6191e45bab0f646659c8cb121": [1]
+    # Add your OpenAI key here if needed
+    # "sk-your-openai-key": [2]
+
+  # Forward keys for client authentication (optional)
+  forward_key:
+    0: ["deepseek-fk"]        # Forward key for DeepSeek access
+    1: ["lingyiwanwu-fk"]     # Forward key for LingyiWanwu access
+    2: ["openai-fk"]          # Forward key for OpenAI access
+
+# Rate Limiting Configuration
+# Prevent abuse and ensure fair usage across all services
+rate_limit:
+  global_rate_limit: "1000/minute"             # Global request limit (increased)
+  strategy: "moving-window"                    # Rate limiting strategy
+  iter_chunk: "one-by-one"                     # Request processing method
+
+# Request timeout configuration (seconds)
+timeout: 30                                    # Increased timeout for better reliability
+
+# Access Control
+# Configure IP-based access restrictions (optional)
+ip_blacklist:                                  # Add IPs to block
+ip_whitelist:                                  # Add IPs to allow (empty = allow all)
+
+# WebUI Configuration
+# Ports for web interface management
+webui_restart_port: 15555                      # Port for service restart
+webui_log_port: 15556                          # Port for log viewing
+
+# Proxy Configuration
+proxy:                                         # HTTP proxy settings (optional)
+
+# Default streaming response behavior
+default_stream_response: true                  # Enable streaming by default
+
+# Timezone Configuration
+tz: Asia/Shanghai                              # Set timezone for logging
+
+# ==============================================================================
+# Usage Examples:
+# 
+# 1. DeepSeek API Usage:
+#    POST http://localhost:8000/deepseek/v1/chat/completions
+#    Headers: Authorization: Bearer sk-878a5319c7b14bc48109e19315361b7f
+#
+# 2. LingyiWanwu API Usage:  
+#    POST http://localhost:8000/lingyiwanwu/v1/chat/completions
+#    Headers: Authorization: Bearer 72ebf8a6191e45bab0f646659c8cb121
+#
+# 3. OpenAI API Usage:
+#    POST http://localhost:8000/v1/chat/completions  
+#    Headers: Authorization: Bearer your-openai-key
+# ==============================================================================

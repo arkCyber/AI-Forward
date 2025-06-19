@@ -1,0 +1,8 @@
+**/*
+!openai_forward
+!pyproject.toml
+!README.md
+!LICENSE
+!ai_router.py
+!test_ai_router.py
+!start_ai_router.sh

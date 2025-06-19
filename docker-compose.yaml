@@ -1,0 +1,368 @@
+# ==============================================================================
+# Docker Compose Configuration for OpenAI Forward + Ollama + AI Router + WebUI
+# ==============================================================================
+# Description: Multi-AI service stack with cloud and local AI providers and WebUI
+# Author: Assistant
+# Created: 2024-12-19
+# Updated: 2024-12-19
+# Version: 3.1
+#
+# Services included:
+# - Smart AI Router (Unified API endpoint on port 9000)
+# - OpenAI Forward (DeepSeek + LingyiWanwu + Ollama proxy)
+# - OpenAI Forward WebUI (Configuration management interface on port 8001)
+# - Ollama (Local AI models)
+# ==============================================================================
+
+services:
+  # NGINX Reverse Proxy and Load Balancer - Multi-User Gateway
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: nginx-gateway
+    
+    ports:
+      - "80:80"      # HTTP access port
+      - "443:443"    # HTTPS access port (ready for SSL)
+    
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./logs/nginx:/var/log/nginx
+      - ./static:/usr/share/nginx/html/static:ro
+    
+    environment:
+      - TZ=Asia/Shanghai
+      - NGINX_WORKER_PROCESSES=auto
+      - NGINX_WORKER_CONNECTIONS=4096
+    
+    # NGINX depends on all backend services
+    depends_on:
+      ai-router:
+        condition: service_healthy
+      openai-forward:
+        condition: service_started
+      openai-forward-webui:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    
+    restart: unless-stopped
+    
+    # NGINX health check
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.2'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=nginx-gateway"
+    
+    networks:
+      - ai-services-network
+
+  # Smart AI Router - Unified API Endpoint
+  ai-router:
+    build:
+      context: .
+      dockerfile: Dockerfile.router
+    image: ai-router:latest
+    container_name: smart-ai-router
+    
+    ports:
+      - "9000:9000"  # 统一API端点
+    
+    volumes:
+      - ./ai-router-logs:/app/logs
+    
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    
+    # 依赖OpenAI Forward服务
+    depends_on:
+      openai-forward:
+        condition: service_started
+    
+    restart: unless-stopped
+    
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.3'
+        reservations:
+          memory: 256M
+          cpus: '0.1'
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=ai-router"
+    
+    networks:
+      - ai-services-network
+
+  # OpenAI Forward Proxy Service
+  openai-forward:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: openai-forward:latest
+    container_name: openai-forward-proxy
+    
+    ports:
+      - "8000:8000"
+    
+    volumes:
+      - ./openai-forward-config.yaml:/home/openai-forward/openai-forward-config.yaml:ro
+      - ./logs:/home/openai-forward/logs
+      - ./FLAXKV_DB:/home/openai-forward/FLAXKV_DB
+    
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - OLLAMA_HOST=ollama:11434  # 启用Ollama连接
+    
+    # 启用Ollama依赖
+    depends_on:
+      ollama:
+        condition: service_healthy
+    
+    restart: unless-stopped
+    
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=openai-forward"
+    
+    networks:
+      - ai-services-network
+
+  # OpenAI Forward WebUI Service - Configuration Management Interface
+  openai-forward-webui:
+    build:
+      context: .
+      dockerfile: webui.Dockerfile
+    image: openai-forward-webui:latest
+    container_name: openai-forward-webui
+    
+    ports:
+      - "8001:8001"  # WebUI管理界面端口
+    
+    volumes:
+      - ./openai-forward-config.yaml:/home/openai-forward/openai-forward-config.yaml
+      - ./logs:/home/openai-forward/logs
+      - ./webui-logs:/home/openai-forward/webui-logs
+      - ./FLAXKV_DB:/home/openai-forward/FLAXKV_DB
+    
+    environment:
+      - TZ=Asia/Shanghai
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+      - OPENAI_FORWARD_HOST=openai-forward  # 连接到OpenAI Forward服务
+      - WEBUI_RESTART_PORT=15555
+      - WEBUI_LOG_PORT=15556
+      - STREAMLIT_SERVER_PORT=8001
+      - STREAMLIT_SERVER_HEADLESS=true
+    
+    # 依赖OpenAI Forward服务
+    depends_on:
+      openai-forward:
+        condition: service_started
+    
+    restart: unless-stopped
+    
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.3'
+        reservations:
+          memory: 256M
+          cpus: '0.1'
+    
+    # WebUI健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=openai-forward-webui"
+    
+    networks:
+      - ai-services-network
+
+  # Ollama Local AI Service
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-server
+    
+    ports:
+      - "11434:11434"  # Ollama API端口
+    
+    volumes:
+      - ollama-models:/root/.ollama  # 模型持久化存储
+      - ./ollama-logs:/var/log/ollama  # 日志目录
+    
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_MODELS=/root/.ollama/models
+      - OLLAMA_KEEP_ALIVE=24h
+      - TZ=Asia/Shanghai
+    
+    # Ollama健康检查
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    
+    restart: unless-stopped
+    
+    # Ollama需要更多资源来运行AI模型
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4.0'
+        reservations:
+          memory: 4G
+          cpus: '2.0'
+    
+    # 如果有NVIDIA GPU，取消注释以下配置
+    # runtime: nvidia
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
+    #   - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=ollama"
+    
+    networks:
+      - ai-services-network
+
+networks:
+  ai-services-network:
+    driver: bridge
+    name: ai-services-net
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  logs:
+    driver: local
+  cache:
+    driver: local
+  ai-router-logs:
+    driver: local
+  webui-logs:
+    driver: local
+  ollama-models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./ollama-models  # 本地模型存储目录
+
+# ==============================================================================
+# 使用说明:
+#
+# 1. 启动所有服务:
+#    docker-compose up -d
+#
+# 2. 下载并运行Ollama模型:
+#    docker exec -it ollama-server ollama pull llama3.2
+#    docker exec -it ollama-server ollama pull qwen2:7b
+#    docker exec -it ollama-server ollama pull codegemma
+#
+# 3. 测试服务 (通过NGINX网关 - 推荐):
+#    # 主要API端点 (负载均衡 + 速率限制):
+#    curl -X POST http://localhost/api/v1/chat/completions \
+#      -H "Content-Type: application/json" \
+#      -d '{"model":"gpt-3.5-turbo","messages":[{"role":"user","content":"Hello!"}]}'
+#    
+#    # 健康检查和监控:
+#    curl http://localhost/nginx-health    # NGINX状态
+#    curl http://localhost/health         # 服务健康状态  
+#    curl http://localhost/stats          # 使用统计
+#
+# 4. 查看日志:
+#    docker-compose logs -f nginx
+#    docker-compose logs -f ai-router
+#    docker-compose logs -f openai-forward
+#    docker-compose logs -f openai-forward-webui
+#    docker-compose logs -f ollama
+#
+# 5. 多用户访问端点 (通过NGINX网关):
+# 
+# 🚀 主要生产端点 (推荐):
+# - 🎯 统一AI API: http://localhost/api/v1/chat/completions
+# - 🎯 WebUI管理界面: http://localhost/webui/
+# - 🎯 健康检查: http://localhost/health
+# - 🎯 使用统计: http://localhost/stats
+# - 🎯 NGINX状态: http://localhost/nginx-health
+#
+# 🔧 直接服务访问:
+# - DeepSeek API: http://localhost/deepseek/v1/chat/completions
+# - LingyiWanwu API: http://localhost/lingyiwanwu/v1/chat/completions  
+# - Ollama API: http://localhost/ollama/v1/chat/completions
+# - OpenAI Forward: http://localhost/forward/v1/chat/completions
+# - Ollama直接访问: http://localhost/ollama-direct/
+#
+# 📊 多用户特性:
+# - 速率限制: API调用 100请求/分钟, 聊天 60请求/分钟
+# - 连接限制: 每IP最多50个并发连接
+# - 负载均衡: 自动故障转移和负载分配
+# - 安全头: XSS保护, 内容类型嗅探保护等
+# - 压缩优化: Gzip压缩减少传输大小
+# - 连接池: HTTP/1.1 keepalive优化性能
+#
+# 🎛️ 直接访问端口 (开发调试用):
+# - AI Router: http://localhost:9000
+# - OpenAI Forward: http://localhost:8000  
+# - WebUI: http://localhost:8001
+# - Ollama: http://localhost:11434
+# ==============================================================================

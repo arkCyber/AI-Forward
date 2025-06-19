@@ -1,0 +1,75 @@
+# ==============================================================================
+# Dockerfile for Smart AI Router
+# ==============================================================================
+# Description: Multi-stage Docker build for Smart AI Router service
+# Author: Assistant
+# Created: 2024-12-19
+# Version: 1.0
+#
+# This builds a lightweight container with all dependencies for the AI router
+# ==============================================================================
+
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TZ=Asia/Shanghai \
+    LOG_LEVEL=INFO
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo "📦 Installed system dependencies"
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    fastapi==0.104.1 \
+    uvicorn[standard]==0.24.0 \
+    httpx==0.25.2 \
+    pydantic==2.5.0 \
+    && echo "🐍 Installed Python dependencies"
+
+# Copy the AI router application
+COPY ai_router.py /app/ai_router.py
+
+# Create logs directory
+RUN mkdir -p /app/logs && \
+    chmod 755 /app/logs && \
+    echo "📁 Created logs directory"
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash ai-router && \
+    chown -R ai-router:ai-router /app && \
+    echo "👤 Created ai-router user"
+
+# Switch to non-root user
+USER ai-router
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:9000/health || exit 1
+
+# Expose port
+EXPOSE 9000
+
+# Default command
+CMD ["python", "ai_router.py"]
+
+# ==============================================================================
+# Build and run instructions:
+#
+# 1. Build the image:
+#    docker build -f Dockerfile.router -t ai-router:latest .
+#
+# 2. Run the container:
+#    docker run -d -p 9000:9000 --name ai-router ai-router:latest
+#
+# 3. Test the service:
+#    curl http://localhost:9000/health
+#    curl http://localhost:9000/stats
+# ============================================================================== 
