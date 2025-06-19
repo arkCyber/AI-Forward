@@ -1,0 +1,261 @@
+# ==============================================================================
+# Docker Compose Configuration - Remote Ollama Setup
+# ==============================================================================
+# Description: Docker setup for OpenAI Forward with remote Ollama server
+# Author: Assistant
+# Created: 2024-12-19
+# Version: 1.1
+#
+# This configuration runs AI Gateway services without local Ollama
+# Ollama server is expected to run on a remote machine
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # ==============================================================================
+  # NGINX Gateway Service - Load Balancer & Rate Limiter
+  # ==============================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: ai-gateway-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - openai-forward
+      - webui
+      - ai-router
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
+
+  # ==============================================================================
+  # OpenAI Forward Service - Main Proxy
+  # ==============================================================================
+  openai-forward:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-proxy-openai-forward
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./openai-forward-config-remote-ollama.yaml:/app/openai-forward-config.yaml:ro
+      - ./logs/openai-forward:/app/logs
+      - ./cache:/app/cache
+    environment:
+      - OPENAI_FORWARD_CONFIG=/app/openai-forward-config.yaml
+      - OPENAI_FORWARD_LOG_LEVEL=INFO
+      # Remote Ollama Configuration
+      - OLLAMA_REMOTE_URL=${OLLAMA_REMOTE_URL:-http://192.168.1.100:11434}
+      - OLLAMA_TIMEOUT=60
+      # API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - LINGYIWANWU_API_KEY=${LINGYIWANWU_API_KEY:-}
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+  # ==============================================================================
+  # WebUI Service - Configuration Management
+  # ==============================================================================
+  webui:
+    build:
+      context: .
+      dockerfile: webui.Dockerfile
+    container_name: ai-proxy-webui
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./openai-forward-config-remote-ollama.yaml:/app/openai-forward-config.yaml:ro
+      - ./logs/webui:/app/logs
+    environment:
+      - WEBUI_CONFIG=/app/openai-forward-config.yaml
+      - WEBUI_LOG_LEVEL=INFO
+      # Remote Ollama Configuration for WebUI
+      - OLLAMA_REMOTE_URL=${OLLAMA_REMOTE_URL:-http://192.168.1.100:11434}
+      - OLLAMA_HEALTH_CHECK=true
+    depends_on:
+      - openai-forward
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  # ==============================================================================
+  # AI Router Service - Smart Request Routing
+  # ==============================================================================
+  ai-router:
+    build:
+      context: .
+      dockerfile: Dockerfile.router
+    container_name: ai-smart-router
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./ai_router.py:/app/ai_router.py:ro
+      - ./logs/ai-router:/app/logs
+    environment:
+      - ROUTER_LOG_LEVEL=INFO
+      - OPENAI_FORWARD_URL=http://openai-forward:8000
+      # Remote Ollama Configuration for Router
+      - OLLAMA_REMOTE_URL=${OLLAMA_REMOTE_URL:-http://192.168.1.100:11434}
+      - OLLAMA_MODELS=llama3.2,qwen2,codegemma
+      # Load Balancing Configuration
+      - LOAD_BALANCE_STRATEGY=round_robin
+      - HEALTH_CHECK_INTERVAL=30
+    depends_on:
+      - openai-forward
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "30m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  # ==============================================================================
+  # Monitoring Service - System Health Dashboard
+  # ==============================================================================
+  monitoring:
+    image: python:3.11-slim
+    container_name: ai-monitoring
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./monitor_system.py:/app/monitor_system.py:ro
+      - ./logs/monitoring:/app/logs
+    working_dir: /app
+    command: >
+      sh -c "
+        pip install psutil aiohttp fastapi uvicorn requests &&
+        python monitor_system.py
+      "
+    environment:
+      - MONITORING_PORT=8002
+      - SERVICES_TO_MONITOR=openai-forward:8000,webui:8001,ai-router:9000
+      # Remote Ollama Monitoring
+      - OLLAMA_REMOTE_URL=${OLLAMA_REMOTE_URL:-http://192.168.1.100:11434}
+      - CHECK_INTERVAL=30
+    depends_on:
+      - openai-forward
+      - webui
+      - ai-router
+    restart: unless-stopped
+    networks:
+      - ai-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.3"
+
+# ==============================================================================
+# Network Configuration
+# ==============================================================================
+networks:
+  ai-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ==============================================================================
+# Volumes Configuration
+# ==============================================================================
+volumes:
+  ai-logs:
+    driver: local
+  ai-cache:
+    driver: local
+
+# ==============================================================================
+# Environment Variables Template
+# ==============================================================================
+# Create a .env file with the following variables:
+#
+# # Remote Ollama Configuration
+# OLLAMA_REMOTE_URL=http://192.168.1.100:11434
+# 
+# # API Keys
+# OPENAI_API_KEY=sk-your-openai-key-here
+# DEEPSEEK_API_KEY=sk-your-deepseek-key-here
+# LINGYIWANWU_API_KEY=your-lingyiwanwu-key-here
+#
+# # Optional: Custom timeouts and configurations
+# OLLAMA_TIMEOUT=60
+# HEALTH_CHECK_INTERVAL=30
+# ============================================================================== 

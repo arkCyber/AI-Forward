@@ -1,0 +1,162 @@
+# ==============================================================================
+# OpenAI Forward Configuration File - Remote Ollama Setup
+# ==============================================================================
+# Description: Configuration for using remote Ollama server instead of local
+# Author: Assistant
+# Created: 2024-12-19
+# Version: 1.1
+# 
+# This configuration enables proxying with REMOTE Ollama server:
+# - DeepSeek AI (https://api.deepseek.com)
+# - 零一万物 LingyiWanwu (https://api.lingyiwanwu.com/v1) 
+# - Original OpenAI API (https://api.openai.com)
+# - Remote Ollama Server (http://YOUR_REMOTE_IP:11434)
+# ==============================================================================
+
+# Logging Configuration
+log:
+  general: true
+  openai: true
+
+# Cache Configuration  
+cache:
+  general: true
+  openai: true
+  routes:
+    - "/v1/chat/completions"
+    - "/v1/embeddings" 
+  backend: MEMORY
+  root_path_or_url: "./FLAXKV_DB"
+  default_request_caching_value: false
+
+# Main chat completion route
+chat_completion_route: "/v1/chat/completions"
+
+# Enable benchmark mode for performance testing
+benchmark_mode: true
+
+# Forward Configuration - REMOTE OLLAMA SETUP
+forward:
+  # Original OpenAI API - Default route
+  - base_url: "https://api.openai.com"
+    route: "/"
+    type: "openai"
+    
+  # DeepSeek AI Service
+  - base_url: "https://api.deepseek.com"
+    route: "/deepseek"
+    type: "openai"
+    
+  # 零一万物 LingyiWanwu Service
+  - base_url: "https://api.lingyiwanwu.com"
+    route: "/lingyiwanwu"
+    type: "openai"
+    
+  # REMOTE Ollama Server Configuration
+  # Replace YOUR_REMOTE_OLLAMA_IP with actual IP address
+  - base_url: "http://YOUR_REMOTE_OLLAMA_IP:11434"
+    route: "/ollama"
+    type: "general"
+    # Optional: Add custom headers if needed
+    # headers:
+    #   X-Custom-Header: "value"
+    # Optional: Set custom timeout for remote server
+    timeout: 60  # Increased timeout for remote server
+
+# Environment Variables Support for Remote Ollama
+# You can also use environment variable: ${OLLAMA_REMOTE_URL}
+# Example alternative configuration:
+# - base_url: "${OLLAMA_REMOTE_URL:-http://localhost:11434}"
+#   route: "/ollama"
+#   type: "general"
+
+# API Key Management
+api_key:
+  level:
+    0: ["deepseek-chat", "deepseek-coder"]
+    1: ["yi-34b-chat", "yi-6b-chat"]
+    2: ["gpt-3.5-turbo", "gpt-4"]
+    3: ["llama3.2", "qwen2", "codegemma"]  # Ollama models
+
+  openai_key:
+    # Unified API Key with access to all services including Ollama
+    "sk-8d6804b011614dba7bd065f8644514b": [0, 1, 2, 3]
+    # Individual service keys
+    "sk-878a5319c7b14bc48109e19315361b7f": [0]  # DeepSeek
+    "72ebf8a6191e45bab0f646659c8cb121": [1]     # LingyiWanwu
+    # Add Ollama-specific key if needed
+    "ollama-api-key-if-secured": [3]
+
+  forward_key:
+    0: ["deepseek-fk"]
+    1: ["lingyiwanwu-fk"] 
+    2: ["openai-fk"]
+    3: ["ollama-fk"]  # Ollama forward key
+
+# Rate Limiting - Adjusted for remote server
+rate_limit:
+  global_rate_limit: "1000/minute"
+  strategy: "moving-window"
+  iter_chunk: "one-by-one"
+
+# Increased timeout for remote Ollama server
+timeout: 60
+
+# Network Configuration for Remote Ollama
+# Configure connection pooling and retries
+connection:
+  pool_maxsize: 100
+  pool_maxsize_per_host: 20
+  retries: 3
+  backoff_factor: 0.3
+
+# Access Control
+ip_blacklist: []
+ip_whitelist: []
+
+# WebUI Configuration
+webui_restart_port: 15555
+webui_log_port: 15556
+
+# Proxy Configuration (if your remote Ollama is behind a proxy)
+proxy: 
+  # http: "http://proxy.example.com:8080"
+  # https: "https://proxy.example.com:8080"
+
+# Default streaming response behavior
+default_stream_response: true
+
+# Timezone Configuration
+tz: Asia/Shanghai
+
+# Health Check Configuration for Remote Services
+health_check:
+  enabled: true
+  interval: 30  # Check every 30 seconds
+  timeout: 10   # 10 second timeout
+  endpoints:
+    ollama: "/api/tags"  # Ollama health check endpoint
+
+# ==============================================================================
+# Remote Ollama Configuration Instructions:
+#
+# 1. Replace YOUR_REMOTE_OLLAMA_IP with your actual Ollama server IP
+#    Example: "http://192.168.1.100:11434"
+#    Example: "http://ai-server.example.com:11434"
+#
+# 2. Ensure your remote Ollama server is accessible:
+#    - Firewall allows port 11434
+#    - Ollama is configured to listen on 0.0.0.0:11434
+#    - Network connectivity between servers
+#
+# 3. Test connectivity before starting:
+#    curl http://YOUR_REMOTE_OLLAMA_IP:11434/api/tags
+#
+# 4. For environment variable usage:
+#    export OLLAMA_REMOTE_URL="http://192.168.1.100:11434"
+#    
+# 5. Security considerations:
+#    - Use VPN or private network for Ollama traffic
+#    - Consider adding authentication if needed
+#    - Monitor network latency and adjust timeouts
+# ============================================================================== 

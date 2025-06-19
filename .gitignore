@@ -34,6 +34,7 @@ docker-compose.override.yml
 .docker/
 ollama-models/blobs/
 ollama-models/manifests/
+ollama-models/models/
 ollama-logs/
 ai-router-logs/
 webui-logs/
